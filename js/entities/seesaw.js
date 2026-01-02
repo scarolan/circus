@@ -1,4 +1,4 @@
-// Seesaw entity - the player-controlled paddle
+// Seesaw entity - teeter-totter that launches clowns
 
 import {
     CANVAS_WIDTH,
@@ -17,6 +17,10 @@ export class Seesaw {
         this.x = CANVAS_WIDTH / 2 - this.width / 2;
         this.y = SEESAW_Y;
         this.speed = SEESAW_SPEED;
+
+        // Teeter-totter state: -1 = left down, 1 = right down, 0 = level
+        this.tilt = 0;
+        this.tiltAngle = 0.15; // Visual tilt amount in radians
     }
 
     update() {
@@ -40,24 +44,37 @@ export class Seesaw {
     }
 
     render(ctx) {
-        // Draw the seesaw base/fulcrum
+        const centerX = this.x + this.width / 2;
+        const centerY = this.y + this.height / 2;
+
+        // Draw the fulcrum (triangle base)
         ctx.fillStyle = COLORS.seesawBase;
-        const baseWidth = 8;
-        const baseHeight = 10;
-        ctx.fillRect(
-            this.x + this.width / 2 - baseWidth / 2,
-            this.y + this.height,
-            baseWidth,
-            baseHeight
-        );
+        ctx.beginPath();
+        ctx.moveTo(centerX - 6, this.y + this.height + 12);
+        ctx.lineTo(centerX + 6, this.y + this.height + 12);
+        ctx.lineTo(centerX, this.y + this.height - 2);
+        ctx.closePath();
+        ctx.fill();
 
-        // Draw the seesaw plank
+        // Draw tilted seesaw plank
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(this.tilt * this.tiltAngle);
+
+        // Main plank
         ctx.fillStyle = COLORS.seesaw;
-        ctx.fillRect(this.x, this.y, this.width, this.height);
+        ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
 
-        // Add a simple highlight
+        // Highlight
         ctx.fillStyle = '#FFAA44';
-        ctx.fillRect(this.x, this.y, this.width, 2);
+        ctx.fillRect(-this.width / 2, -this.height / 2, this.width, 2);
+
+        // End markers to show landing zones
+        ctx.fillStyle = '#FFFF00';
+        ctx.fillRect(-this.width / 2, -this.height / 2, 4, this.height);
+        ctx.fillRect(this.width / 2 - 4, -this.height / 2, 4, this.height);
+
+        ctx.restore();
     }
 
     // Get the center X position
@@ -65,18 +82,32 @@ export class Seesaw {
         return this.x + this.width / 2;
     }
 
-    // Check if a point is on the seesaw
-    containsPoint(px, py) {
-        return px >= this.x &&
-               px <= this.x + this.width &&
-               py >= this.y &&
-               py <= this.y + this.height;
+    // Get left end X position
+    getLeftX() {
+        return this.x + 8; // A bit inward from edge
     }
 
-    // Get bounce multiplier based on where clown lands (-1 to 1, edges = higher)
-    getBounceMultiplier(clownX) {
-        const relativeX = (clownX - this.x) / this.width; // 0 to 1
-        const distFromCenter = Math.abs(relativeX - 0.5) * 2; // 0 at center, 1 at edges
-        return distFromCenter;
+    // Get right end X position
+    getRightX() {
+        return this.x + this.width - 8;
+    }
+
+    // Get Y position at a given end, accounting for tilt
+    getEndY(side) {
+        // side: -1 for left, 1 for right
+        const tiltOffset = this.tilt * side * Math.sin(this.tiltAngle) * (this.width / 2);
+        return this.y - tiltOffset;
+    }
+
+    // Check which side of seesaw was hit (-1 left, 1 right, 0 miss)
+    getSideHit(clownX) {
+        const center = this.getCenterX();
+        if (clownX < center) return -1; // Left side
+        return 1; // Right side
+    }
+
+    // Set tilt based on which side was landed on
+    setTilt(side) {
+        this.tilt = side; // -1 left down, 1 right down
     }
 }

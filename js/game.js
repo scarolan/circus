@@ -1,4 +1,4 @@
-// Core game logic and state machine
+// Core game logic and state machine - Teeter-totter mechanics
 
 import {
     CANVAS_WIDTH,
@@ -6,7 +6,11 @@ import {
     SEESAW_Y,
     STARTING_LIVES,
     BONUS_LIFE_SCORE,
-    GAME_STATES
+    GAME_STATES,
+    BOUNCE_BASE,
+    BOUNCE_EDGE_BONUS,
+    CLOWN_WIDTH,
+    CLOWN_HEIGHT
 } from './config.js';
 import { input } from './input.js';
 import { audio } from './audio.js';
@@ -21,8 +25,7 @@ export class Game {
 
         // Game entities
         this.seesaw = new Seesaw();
-        this.clown = new Clown(false);
-        this.clown2 = new Clown(true);
+        this.clowns = [new Clown(false), new Clown(true)];
         this.balloons = new BalloonGrid();
 
         // Game stats
@@ -31,15 +34,24 @@ export class Game {
         this.level = 1;
         this.highScore = this.loadHighScore();
 
-        // Active clown tracking
-        this.activeClown = this.clown;
-        this.waitingClown = this.clown2;
+        // Clown states: one is flying, one is waiting on seesaw
+        this.flyingClownIndex = 0;
+        this.waitingClownIndex = 1;
+        this.waitingSide = 1; // 1 = right side, -1 = left side
 
         // Level complete timer
         this.levelCompleteTimer = 0;
 
         // For bonus life tracking
         this.nextBonusAt = BONUS_LIFE_SCORE;
+    }
+
+    get flyingClown() {
+        return this.clowns[this.flyingClownIndex];
+    }
+
+    get waitingClown() {
+        return this.clowns[this.waitingClownIndex];
     }
 
     loadHighScore() {
@@ -66,13 +78,21 @@ export class Game {
         this.nextBonusAt = BONUS_LIFE_SCORE;
 
         this.seesaw = new Seesaw();
-        this.clown.reset();
-        this.clown2.reset();
-        this.clown2.active = false; // Second clown waits
-        this.activeClown = this.clown;
-        this.waitingClown = this.clown2;
-
         this.balloons.reset();
+
+        // Set up initial clown positions
+        // Clown 0 starts in the air, Clown 1 waits on right side of seesaw
+        this.flyingClownIndex = 0;
+        this.waitingClownIndex = 1;
+        this.waitingSide = 1; // Right side
+
+        // Flying clown starts from top
+        this.flyingClown.reset();
+        this.flyingClown.active = true;
+
+        // Waiting clown sits on seesaw
+        this.waitingClown.active = false;
+        this.seesaw.setTilt(-this.waitingSide); // Tilt opposite to waiting side (waiting side is up)
 
         audio.playStart();
     }
@@ -81,14 +101,46 @@ export class Game {
         this.level++;
         this.balloons.reset();
 
-        // Reset clowns for new level
-        this.clown.reset();
-        this.clown2.reset();
-        this.clown2.active = false;
-        this.activeClown = this.clown;
-        this.waitingClown = this.clown2;
+        // Reset for new level - flying clown starts from top
+        this.flyingClown.reset();
+        this.flyingClown.active = true;
+        this.waitingClown.active = false;
 
         this.state = GAME_STATES.PLAYING;
+    }
+
+    launchWaitingClown(landingSide) {
+        // The clown that was waiting gets launched
+        const launchedClown = this.waitingClown;
+        const landingClown = this.flyingClown;
+
+        // Calculate launch velocity based on how far from center the landing was
+        // and how fast the landing clown was going
+        const launchPower = BOUNCE_BASE + (BOUNCE_EDGE_BONUS * Math.abs(landingClown.vy) / 10);
+
+        // Position launched clown at the opposite end from where landing occurred
+        const launchSide = -landingSide;
+        launchedClown.x = launchSide === -1 ? this.seesaw.getLeftX() - CLOWN_WIDTH / 2 : this.seesaw.getRightX() - CLOWN_WIDTH / 2;
+        launchedClown.y = this.seesaw.y - CLOWN_HEIGHT;
+        launchedClown.vy = launchPower;
+        launchedClown.vx = launchSide * 1.5; // Slight outward velocity
+        launchedClown.active = true;
+
+        // Landing clown now waits on the landing side
+        landingClown.active = false;
+        landingClown.vy = 0;
+        landingClown.vx = 0;
+
+        // Swap roles
+        const temp = this.flyingClownIndex;
+        this.flyingClownIndex = this.waitingClownIndex;
+        this.waitingClownIndex = temp;
+
+        // Update waiting side and tilt
+        this.waitingSide = landingSide;
+        this.seesaw.setTilt(-landingSide); // Tilt so waiting side is up
+
+        audio.playBounce();
     }
 
     loseLife() {
@@ -98,21 +150,10 @@ export class Game {
         if (this.lives <= 0) {
             this.gameOver();
         } else {
-            // Swap clowns - waiting clown becomes active
-            this.swapClowns();
-
-            // Reset the new active clown
-            this.activeClown.reset();
+            // Reset - drop a new clown from the top
+            this.flyingClown.reset();
+            this.flyingClown.active = true;
         }
-    }
-
-    swapClowns() {
-        const temp = this.activeClown;
-        this.activeClown = this.waitingClown;
-        this.waitingClown = temp;
-
-        this.activeClown.active = true;
-        this.waitingClown.active = false;
     }
 
     gameOver() {
@@ -137,30 +178,28 @@ export class Game {
     }
 
     checkSeesawCollision() {
-        if (!this.activeClown.active) return;
-
-        const clown = this.activeClown;
+        const clown = this.flyingClown;
+        if (!clown.active) return;
 
         // Only check when clown is falling
         if (clown.vy <= 0) return;
 
         const clownBounds = clown.getBounds();
+        const seesawTop = this.seesaw.y;
 
-        // Check if clown is at seesaw height
-        if (clownBounds.bottom >= this.seesaw.y &&
-            clownBounds.bottom <= this.seesaw.y + this.seesaw.height + clown.vy) {
+        // Check if clown reached seesaw height
+        if (clownBounds.bottom >= seesawTop &&
+            clownBounds.bottom <= seesawTop + clown.vy + 10) {
 
-            // Check horizontal overlap
+            // Check horizontal overlap with seesaw
             if (clownBounds.right >= this.seesaw.x &&
                 clownBounds.left <= this.seesaw.x + this.seesaw.width) {
 
-                // Bounce!
-                clown.bounce(this.seesaw);
-                audio.playBounce();
+                // Determine which side was hit
+                const landingSide = this.seesaw.getSideHit(clown.getCenterX());
 
-                // Swap clowns on bounce
-                this.swapClowns();
-                this.activeClown.reset();
+                // Launch the waiting clown!
+                this.launchWaitingClown(landingSide);
             }
         }
     }
@@ -191,21 +230,28 @@ export class Game {
 
         // Playing state
         this.seesaw.update();
-        this.activeClown.update();
+
+        // Update flying clown
+        if (this.flyingClown.active) {
+            this.flyingClown.update();
+        }
+
         this.balloons.update();
 
         // Check seesaw collision
         this.checkSeesawCollision();
 
         // Check balloon collisions
-        const points = this.balloons.checkCollision(this.activeClown);
-        if (points > 0) {
-            this.addScore(points);
-            audio.playPop();
+        if (this.flyingClown.active) {
+            const points = this.balloons.checkCollision(this.flyingClown);
+            if (points > 0) {
+                this.addScore(points);
+                audio.playPop();
+            }
         }
 
         // Check if clown fell
-        if (this.activeClown.hasFallen()) {
+        if (this.flyingClown.active && this.flyingClown.hasFallen()) {
             this.loseLife();
         }
 
@@ -239,16 +285,19 @@ export class Game {
         this.renderer.drawGround();
         this.balloons.render(this.renderer.ctx);
         this.seesaw.render(this.renderer.ctx);
-        this.activeClown.render(this.renderer.ctx);
+
+        // Draw flying clown
+        if (this.flyingClown.active) {
+            this.flyingClown.render(this.renderer.ctx);
+        }
 
         // Draw waiting clown on seesaw
-        if (!this.waitingClown.active) {
-            this.waitingClown.x = this.seesaw.x + this.seesaw.width / 2 - this.waitingClown.width / 2;
-            this.waitingClown.y = this.seesaw.y - this.waitingClown.height;
-            this.waitingClown.active = true;
-            this.waitingClown.render(this.renderer.ctx);
-            this.waitingClown.active = false;
-        }
+        const waitingX = this.waitingSide === -1 ? this.seesaw.getLeftX() : this.seesaw.getRightX();
+        this.waitingClown.x = waitingX - CLOWN_WIDTH / 2;
+        this.waitingClown.y = this.seesaw.y - CLOWN_HEIGHT;
+        this.waitingClown.active = true;
+        this.waitingClown.render(this.renderer.ctx);
+        this.waitingClown.active = false;
 
         // Draw HUD
         this.renderer.drawHUD(this.score, this.lives, this.level);

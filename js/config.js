@@ -27,7 +27,7 @@ export const MAX_VELOCITY_X = 4;
 export const MAX_VELOCITY_Y = 12;
 
 // Seesaw
-export const SEESAW_WIDTH = 40;
+export const SEESAW_WIDTH = 50;
 export const SEESAW_HEIGHT = 8;
 export const SEESAW_Y = CANVAS_HEIGHT - 30;
 export const SEESAW_SPEED = 4;
