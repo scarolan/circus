@@ -34,10 +34,9 @@ export class Game {
         this.level = 1;
         this.highScore = this.loadHighScore();
 
-        // Clown states: one is flying, one is waiting on seesaw
+        // Clown states: one is flying, one is waiting on seesaw (on the DOWN side)
         this.flyingClownIndex = 0;
         this.waitingClownIndex = 1;
-        this.waitingSide = 1; // 1 = right side, -1 = left side
 
         // Level complete timer
         this.levelCompleteTimer = 0;
@@ -81,18 +80,19 @@ export class Game {
         this.balloons.reset();
 
         // Set up initial clown positions
-        // Clown 0 starts in the air, Clown 1 waits on right side of seesaw
+        // Clown 0 starts in the air, Clown 1 waits on the DOWN side of seesaw
         this.flyingClownIndex = 0;
         this.waitingClownIndex = 1;
-        this.waitingSide = 1; // Right side
+
+        // Seesaw starts tilted left-down, so waiting clown is on left (down) side
+        this.seesaw.setTilt(-1); // Left side down
 
         // Flying clown starts from top
         this.flyingClown.reset();
         this.flyingClown.active = true;
 
-        // Waiting clown sits on seesaw
+        // Waiting clown sits on the down side of seesaw
         this.waitingClown.active = false;
-        this.seesaw.setTilt(-this.waitingSide); // Tilt opposite to waiting side (waiting side is up)
 
         audio.playStart();
     }
@@ -110,23 +110,27 @@ export class Game {
     }
 
     launchWaitingClown(landingSide) {
-        // The clown that was waiting gets launched
+        // The clown that was waiting (on the DOWN side) gets launched
         const launchedClown = this.waitingClown;
         const landingClown = this.flyingClown;
 
-        // Calculate launch velocity based on how far from center the landing was
-        // and how fast the landing clown was going
+        // Calculate launch velocity based on how fast the landing clown was going
         const launchPower = BOUNCE_BASE + (BOUNCE_EDGE_BONUS * Math.abs(landingClown.vy) / 10);
 
-        // Position launched clown at the opposite end from where landing occurred
-        const launchSide = -landingSide;
-        launchedClown.x = launchSide === -1 ? this.seesaw.getLeftX() - CLOWN_WIDTH / 2 : this.seesaw.getRightX() - CLOWN_WIDTH / 2;
+        // Launched clown comes from the DOWN side (opposite of where landing occurred)
+        const downSide = this.seesaw.getDownSide();
+        const launchX = downSide === -1 ? this.seesaw.getLeftX() : this.seesaw.getRightX();
+
+        launchedClown.x = launchX - CLOWN_WIDTH / 2;
         launchedClown.y = this.seesaw.y - CLOWN_HEIGHT;
         launchedClown.vy = launchPower;
-        launchedClown.vx = launchSide * 1.5; // Slight outward velocity
+
+        // Add seesaw momentum to horizontal velocity, plus slight outward push
+        const seesawMomentum = this.seesaw.getVelocity() * 0.8;
+        launchedClown.vx = seesawMomentum + (downSide * 0.5);
         launchedClown.active = true;
 
-        // Landing clown now waits on the landing side
+        // Landing clown now waits on the landing side (which becomes the new DOWN side)
         landingClown.active = false;
         landingClown.vy = 0;
         landingClown.vx = 0;
@@ -136,9 +140,8 @@ export class Game {
         this.flyingClownIndex = this.waitingClownIndex;
         this.waitingClownIndex = temp;
 
-        // Update waiting side and tilt
-        this.waitingSide = landingSide;
-        this.seesaw.setTilt(-landingSide); // Tilt so waiting side is up
+        // Tilt seesaw so landing side is now DOWN (waiting clown sits there)
+        this.seesaw.setTilt(landingSide);
 
         audio.playBounce();
     }
@@ -195,11 +198,18 @@ export class Game {
             if (clownBounds.right >= this.seesaw.x &&
                 clownBounds.left <= this.seesaw.x + this.seesaw.width) {
 
-                // Determine which side was hit
-                const landingSide = this.seesaw.getSideHit(clown.getCenterX());
+                const clownCenterX = clown.getCenterX();
 
-                // Launch the waiting clown!
-                this.launchWaitingClown(landingSide);
+                // Must land on the UP side to launch the other clown
+                if (this.seesaw.isOnUpSide(clownCenterX)) {
+                    // Determine which side was hit
+                    const landingSide = this.seesaw.getSideHit(clownCenterX);
+
+                    // Launch the waiting clown!
+                    this.launchWaitingClown(landingSide);
+                }
+                // If landed on DOWN side (where waiting clown is), clown falls through
+                // This is a miss - clown will fall and lose a life
             }
         }
     }
@@ -291,10 +301,11 @@ export class Game {
             this.flyingClown.render(this.renderer.ctx);
         }
 
-        // Draw waiting clown on seesaw
-        const waitingX = this.waitingSide === -1 ? this.seesaw.getLeftX() : this.seesaw.getRightX();
+        // Draw waiting clown on the DOWN side of seesaw
+        const downSide = this.seesaw.getDownSide();
+        const waitingX = downSide === -1 ? this.seesaw.getLeftX() : this.seesaw.getRightX();
         this.waitingClown.x = waitingX - CLOWN_WIDTH / 2;
-        this.waitingClown.y = this.seesaw.y - CLOWN_HEIGHT;
+        this.waitingClown.y = this.seesaw.y - CLOWN_HEIGHT + 4; // Slightly lower on down side
         this.waitingClown.active = true;
         this.waitingClown.render(this.renderer.ctx);
         this.waitingClown.active = false;

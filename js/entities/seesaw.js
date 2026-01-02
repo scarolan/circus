@@ -18,12 +18,18 @@ export class Seesaw {
         this.y = SEESAW_Y;
         this.speed = SEESAW_SPEED;
 
-        // Teeter-totter state: -1 = left down, 1 = right down, 0 = level
-        this.tilt = 0;
-        this.tiltAngle = 0.15; // Visual tilt amount in radians
+        // Teeter-totter state: -1 = left down, 1 = right down
+        this.tilt = -1; // Start with left side down
+        this.tiltAngle = 0.2; // Visual tilt amount in radians
+
+        // Track velocity for momentum transfer
+        this.vx = 0;
+        this.prevX = this.x;
     }
 
     update() {
+        this.prevX = this.x;
+
         // Mouse control takes priority
         const mouseX = input.getMouseX();
         if (mouseX !== null) {
@@ -41,6 +47,9 @@ export class Seesaw {
 
         // Clamp to screen bounds
         this.x = Math.max(0, Math.min(CANVAS_WIDTH - this.width, this.x));
+
+        // Calculate velocity for momentum transfer
+        this.vx = this.x - this.prevX;
     }
 
     render(ctx) {
@@ -99,15 +108,44 @@ export class Seesaw {
         return this.y - tiltOffset;
     }
 
-    // Check which side of seesaw was hit (-1 left, 1 right, 0 miss)
+    // Check which side of seesaw was hit (-1 left, 1 right)
     getSideHit(clownX) {
         const center = this.getCenterX();
         if (clownX < center) return -1; // Left side
         return 1; // Right side
     }
 
+    // Get which side is currently UP (-1 = left up, 1 = right up)
+    getUpSide() {
+        return -this.tilt; // Opposite of tilt direction
+    }
+
+    // Get which side is currently DOWN
+    getDownSide() {
+        return this.tilt;
+    }
+
+    // Check if clown landed on the UP side (with margin)
+    isOnUpSide(clownX, margin = 8) {
+        const center = this.getCenterX();
+        const upSide = this.getUpSide();
+
+        if (upSide === -1) {
+            // Left side is up - clown should be on left half
+            return clownX < center + margin;
+        } else {
+            // Right side is up - clown should be on right half
+            return clownX > center - margin;
+        }
+    }
+
     // Set tilt based on which side was landed on
     setTilt(side) {
         this.tilt = side; // -1 left down, 1 right down
+    }
+
+    // Get current horizontal velocity for momentum transfer
+    getVelocity() {
+        return this.vx;
     }
 }
